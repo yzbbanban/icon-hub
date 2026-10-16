@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  icon-hub:
+    build: .
+    container_name: icon-hub
+    restart: always
+    ports:
+      - "3300:3300"
+    env_file:
+      - .env
+    volumes:
+      # 将宿主机当前目录下的 data 文件夹挂载到容器内，永久保存数据库(db.json)、上传原图(uploads)与生成的离线包(packages)
+      - ./data:/app/data

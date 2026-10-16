@@ -1,0 +1,25 @@
+{
+  "name": "icon-hub",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "团队内部 SVG 图标与图片资源管理系统（仿 Iconfont 上传与 Symbol 自动生成）",
+  "scripts": {
+    "dev": "node server/index.js --dev",
+    "build": "vite build",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "svg2ttf": "^6.1.0",
+    "svgpath": "^2.6.0",
+    "ttf2woff": "^3.0.0",
+    "vue": "^3.4.27",
+    "wawoff2": "^2.0.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.5",
+    "vite": "^5.2.11"
+  }
+}
