@@ -24,16 +24,7 @@
 
       <!-- 右侧操作区 -->
       <div style="display: flex; align-items: center; gap: 10px;">
-        <button
-          class="btn btn-sm"
-          :class="isAuthenticated ? 'btn-secondary' : 'btn-ghost'"
-          @click="handleAuthButtonClick"
-          :title="isAuthenticated ? '点击可退出管理态' : '输入 .env 中的管理密码解锁上传与编辑'"
-        >
-          <span>{{ isAuthenticated ? '🔓 已解锁管理' : '🔒 操作鉴权' }}</span>
-        </button>
-
-        <button class="btn btn-primary" @click="requestProtectedAction(() => (showUploadModal = true))">
+        <button class="btn btn-primary" @click="showUploadModal = true">
           <span>📥 上传 / 导入 Iconfont</span>
         </button>
       </div>
@@ -51,7 +42,7 @@
             <div
               class="nav-item"
               :class="{ active: activeProjectId === 'all' }"
-              @click="activeProjectId = 'all'"
+              @click="switchProject('all')"
             >
               <span>📚 全部图标资源</span>
               <span class="badge">{{ totalIconsCount }}</span>
@@ -65,7 +56,7 @@
             <button
               class="btn btn-ghost btn-sm"
               style="padding: 2px 6px;"
-              @click="requestProtectedAction(() => (showNewProjectModal = true))"
+              @click="showNewProjectModal = true"
             >
               + 新建
             </button>
@@ -77,7 +68,7 @@
               :key="proj.id"
               class="nav-item"
               :class="{ active: activeProjectId === proj.id }"
-              @click="activeProjectId = proj.id"
+              @click="switchProject(proj.id)"
             >
               <div style="min-width: 0; flex: 1;">
                 <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
@@ -101,12 +92,11 @@
             <span
               style="font-size: 10.5px; background: #dcfce7; color: #15803d; padding: 1px 6px; border-radius: 999px; font-weight: 600;"
             >
-              实时落盘
+              免密开放
             </span>
           </div>
           <div style="line-height: 1.6; font-size: 11.5px;">
-            <div>• 数据库：<code>data/iconhub.sqlite</code></div>
-            <div>• 镜像备份：<code>data/db.json</code></div>
+            <div>• 数据存储：<code>data/db.json</code></div>
             <div>• 源文件：<code>data/uploads/</code></div>
             <div>• 离线包：<code>data/packages/{{ currentProjectCode }}/iconfont/</code></div>
           </div>
@@ -122,14 +112,52 @@
               <h2 style="font-size: 18px; font-weight: 700;">
                 {{ currentProject ? currentProject.name : '全部项目图标合集' }}
               </h2>
-              <span class="badge" style="background: #e0e7ff; color: var(--primary); font-family: monospace;">
+
+              <!-- 行内编辑前缀 或 点击修改徽章 -->
+              <div v-if="isEditingPrefix && currentProject" style="display: inline-flex; align-items: center; gap: 6px;">
+                <span style="font-size: 12.5px; font-weight: 600; color: var(--text-secondary);">前缀:</span>
+                <input
+                  ref="prefixInputRef"
+                  v-model="editPrefixValue"
+                  class="input"
+                  style="width: 110px; padding: 3px 8px; font-size: 13px; font-family: monospace;"
+                  placeholder="如: icon-"
+                  @keyup.enter="saveProjectPrefix"
+                  @keyup.esc="cancelEditPrefix"
+                />
+                <button class="btn btn-primary btn-sm" style="padding: 3px 8px;" @click="saveProjectPrefix">
+                  保存
+                </button>
+                <button class="btn btn-ghost btn-sm" style="padding: 3px 8px;" @click="cancelEditPrefix">
+                  取消
+                </button>
+              </div>
+              <span
+                v-else
+                class="badge badge-editable"
+                style="background: #e0e7ff; color: var(--primary); font-family: monospace; display: inline-flex; align-items: center; gap: 4px;"
+                :title="currentProject ? '点击直接修改此前缀' : ''"
+                @click="currentProject && startEditPrefix(currentProject)"
+              >
                 前缀: {{ currentProject ? currentProject.prefix : 'icon-' }}
+                <span v-if="currentProject" style="font-size: 11px; opacity: 0.8;" title="点击修改前缀">✏️</span>
               </span>
+
+              <!-- 编辑项目分组按钮 -->
+              <button
+                v-if="currentProject"
+                class="btn btn-secondary btn-sm"
+                style="padding: 3px 8px; font-size: 12px;"
+                @click="openEditProjectModal(currentProject)"
+              >
+                ✏️ 编辑项目
+              </button>
+
               <button
                 v-if="currentProject && projects.length > 1"
                 class="btn btn-ghost btn-sm"
-                style="color: var(--danger);"
-                @click="requestProtectedAction(() => handleDeleteProject(currentProject))"
+                style="color: var(--danger); padding: 3px 8px; font-size: 12px;"
+                @click="handleDeleteProject(currentProject)"
               >
                 删除项目
               </button>
@@ -195,6 +223,16 @@
                 </button>
               </div>
             </div>
+
+            <!-- 批量操作开启/退出按钮 -->
+            <button
+              class="btn btn-sm"
+              :class="isBatchMode ? 'btn-primary' : 'btn-secondary'"
+              style="margin-left: 6px;"
+              @click="toggleBatchMode"
+            >
+              {{ isBatchMode ? '✕ 退出批量操作' : '☑️ 批量管理' }}
+            </button>
           </div>
 
           <div class="toolbar-group">
@@ -231,14 +269,52 @@
           </div>
         </div>
 
+        <!-- 批量管理操作控制条 -->
+        <div v-if="isBatchMode" class="batch-toolbar">
+          <div style="display: flex; align-items: center; gap: 12px; font-size: 13px;">
+            <span style="font-weight: 700; color: var(--primary);">
+              已选中 {{ selectedIconIds.size }} / {{ filteredIcons.length }} 个图标
+            </span>
+            <button class="btn btn-secondary btn-sm" @click="toggleSelectAllFiltered">
+              {{ isAllFilteredSelected ? '取消全选' : '全选当前' }}
+            </button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button
+              class="btn btn-danger btn-sm"
+              :disabled="selectedIconIds.size === 0 || isBatchDeleting"
+              @click="handleBatchDelete"
+            >
+              {{ isBatchDeleting ? '正在删除...' : `🗑 批量删除已选 (${selectedIconIds.size})` }}
+            </button>
+            <button class="btn btn-ghost btn-sm" @click="toggleBatchMode">
+              退出
+            </button>
+          </div>
+        </div>
+
         <!-- 图标网格列表 -->
         <div v-if="filteredIcons.length > 0" class="icon-grid">
           <div
             v-for="icon in filteredIcons"
             :key="icon.id"
             class="icon-card"
-            @click="selectedIcon = icon"
+            :class="{ selected: selectedIconIds.has(icon.id) }"
+            @click="handleCardClick(icon)"
           >
+            <!-- 批量管理多选框 -->
+            <div
+              v-if="isBatchMode"
+              class="icon-card-checkbox"
+              @click.stop="toggleSelectIcon(icon.id)"
+            >
+              <input
+                type="checkbox"
+                :checked="selectedIconIds.has(icon.id)"
+                @change="toggleSelectIcon(icon.id)"
+              />
+            </div>
+
             <div class="icon-preview-box" :class="globalBgClass">
               <span class="icon-type-tag">
                 {{
@@ -272,8 +348,8 @@
                 }"
               />
 
-              <!-- Hover 快捷操作浮层 -->
-              <div class="icon-hover-actions" @click.stop>
+              <!-- Hover 快捷操作浮层 (非批量模式下生效) -->
+              <div v-if="!isBatchMode" class="icon-hover-actions" @click.stop>
                 <button
                   v-if="icon.type === 'svg'"
                   class="hover-btn"
@@ -326,52 +402,16 @@
           <div style="font-size: 36px; margin-bottom: 10px;">🗂️</div>
           <div style="font-size: 16px; font-weight: 600;">暂无匹配的图标资源</div>
           <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px; margin-bottom: 16px;">
-            你可以切换分组筛选，或点击右上角“上传图标”批量导入 SVG / PNG
+            你可以切换分组筛选，或点击右上角“上传 / 导入 Iconfont”批量导入 SVG / PNG
           </div>
-          <button class="btn btn-primary" @click="requestProtectedAction(() => (showUploadModal = true))">
-            📤 立即上传图标
+          <button class="btn btn-primary" @click="showUploadModal = true">
+            📥 立即上传 / 导入图标
           </button>
         </div>
       </main>
     </div>
 
-    <!-- 1. 操作密码验证弹窗 -->
-    <div v-if="showAuthModal" class="modal-backdrop" @click.self="closeAuthModal">
-      <div class="modal-card" style="max-width: 420px;">
-        <div class="modal-header">
-          <div class="modal-title">🔐 管理员操作鉴权</div>
-          <button class="btn btn-ghost btn-sm" @click="closeAuthModal">✕</button>
-        </div>
-        <form @submit.prevent="submitPasswordVerify">
-          <div class="modal-body">
-            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
-              日常浏览、搜索与下载无需密码。执行<strong>上传、新建分组、编辑或删除</strong>需验证管理密码（配置于项目根目录 <code>.env</code> 的 <code>ADMIN_PASSWORD</code>）。
-            </p>
-            <label style="display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 6px;">
-              管理密码
-            </label>
-            <input
-              v-model="passwordInput"
-              type="password"
-              class="input"
-              placeholder="请输入管理密码（默认: admin123）"
-              autofocus
-            />
-            <div v-if="authError" style="color: var(--danger); font-size: 12.5px; margin-top: 8px;">
-              ⚠️ {{ authError }}
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" @click="closeAuthModal">取消</button>
-            <button type="submit" class="btn btn-primary" :disabled="verifyingAuth">
-              {{ verifyingAuth ? '验证中...' : '解锁并继续' }}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- 2. 新建项目分组弹窗 -->
+    <!-- 1. 新建项目分组弹窗 -->
     <div v-if="showNewProjectModal" class="modal-backdrop" @click.self="showNewProjectModal = false">
       <div class="modal-card" style="max-width: 480px;">
         <div class="modal-header">
@@ -426,15 +466,60 @@
       </div>
     </div>
 
+    <!-- 2. 编辑项目分组弹窗 -->
+    <div v-if="showEditProjectModal" class="modal-backdrop" @click.self="showEditProjectModal = false">
+      <div class="modal-card" style="max-width: 480px;">
+        <div class="modal-header">
+          <div class="modal-title">✏️ 编辑项目分组</div>
+          <button class="btn btn-ghost btn-sm" @click="showEditProjectModal = false">✕</button>
+        </div>
+        <form @submit.prevent="submitEditProject">
+          <div class="modal-body" style="display: flex; flex-direction: column; gap: 14px;">
+            <div>
+              <label style="display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 4px;">
+                项目名称 *
+              </label>
+              <input v-model="editProjectForm.name" class="input" required />
+            </div>
+            <div>
+              <label style="display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 4px;">
+                Class / Symbol 前缀 (Prefix) *
+              </label>
+              <input
+                v-model="editProjectForm.prefix"
+                class="input"
+                style="font-family: monospace;"
+                placeholder="例如: icon- 或 custom-"
+                required
+              />
+              <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
+                修改后该项目所有图标的前缀将自动同步更新，并重新构建 7 件套离线包与 Symbol 代码
+              </div>
+            </div>
+            <div>
+              <label style="display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 4px;">
+                项目备注说明
+              </label>
+              <input v-model="editProjectForm.description" class="input" placeholder="简述该项目图标用途..." />
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="showEditProjectModal = false">取消</button>
+            <button type="submit" class="btn btn-primary" :disabled="isSavingProject">
+              {{ isSavingProject ? '保存并重新打包中...' : '保存修改' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- 3. 批量上传与预处理弹窗 -->
     <UploadModal
       v-if="showUploadModal"
       :projects="projects"
       :initial-project-id="activeProjectId"
-      :auth-token="authToken"
       @close="showUploadModal = false"
       @uploaded="onBatchUploaded"
-      @require-auth="onRequireReAuth"
     />
 
     <!-- 4. 图标详情与改色导出弹窗 -->
@@ -444,12 +529,10 @@
       :projects="projects"
       :initial-color="globalColor"
       :initial-size="64"
-      :auth-token="authToken"
       @close="selectedIcon = null"
       @updated="onIconUpdated"
       @deleted="onIconDeleted"
       @toast="showToast"
-      @require-auth="onRequireReAuth"
     />
 
     <!-- 5. 本地离线包与在线接入指南弹窗 -->
@@ -473,13 +556,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import UploadModal from './components/UploadModal.vue'
 import IconDetailModal from './components/IconDetailModal.vue'
 import SymbolGuideModal from './components/SymbolGuideModal.vue'
 import { copyText } from './utils/iconExport.js'
-
-const TOKEN_STORAGE_KEY = 'iconhub_admin_token'
 
 const projects = ref([])
 const icons = ref([])
@@ -493,18 +574,30 @@ const globalColor = ref('#1e293b')
 const globalSize = ref(36)
 const quickColors = ['#1E293B', '#4F46E5', '#2563EB', '#10B981', '#F59E0B', '#EF4444', '#FFFFFF']
 
-const authToken = ref(localStorage.getItem(TOKEN_STORAGE_KEY) || '')
-const isAuthenticated = ref(false)
-const showAuthModal = ref(false)
-const passwordInput = ref('')
-const authError = ref('')
-const verifyingAuth = ref(false)
-let pendingProtectedCallback = null
-
 const showUploadModal = ref(false)
 const showNewProjectModal = ref(false)
+const showEditProjectModal = ref(false)
 const showSymbolGuideModal = ref(false)
 const selectedIcon = ref(null)
+
+// 前缀行内修改状态
+const isEditingPrefix = ref(false)
+const editPrefixValue = ref('')
+const prefixInputRef = ref(null)
+
+// 项目编辑表单
+const isSavingProject = ref(false)
+const editProjectForm = reactive({
+  id: '',
+  name: '',
+  prefix: '',
+  description: ''
+})
+
+// 批量管理多选状态
+const isBatchMode = ref(false)
+const selectedIconIds = ref(new Set())
+const isBatchDeleting = ref(false)
 
 const newProjectForm = reactive({
   name: '',
@@ -567,6 +660,162 @@ const filteredIcons = computed(() => {
   return list
 })
 
+const isAllFilteredSelected = computed(() => {
+  if (filteredIcons.value.length === 0) return false
+  return filteredIcons.value.every((i) => selectedIconIds.value.has(i.id))
+})
+
+function switchProject(id) {
+  activeProjectId.value = id
+  isEditingPrefix.value = false
+  // 切换项目时清空多选，防止误操作
+  selectedIconIds.value.clear()
+}
+
+function startEditPrefix(project) {
+  editPrefixValue.value = project.prefix || 'icon-'
+  isEditingPrefix.value = true
+  nextTick(() => {
+    prefixInputRef.value?.focus()
+  })
+}
+
+function cancelEditPrefix() {
+  isEditingPrefix.value = false
+}
+
+async function saveProjectPrefix() {
+  if (!currentProject.value) return
+  const raw = editPrefixValue.value.trim().replace(/[^a-zA-Z0-9_-]/g, '')
+  if (!raw) {
+    showToast('前缀不能为空')
+    return
+  }
+  const cleanPrefix = (raw.endsWith('-') || raw.endsWith('_')) ? raw : `${raw}-`
+  try {
+    const res = await fetch(`/api/projects/${currentProject.value.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prefix: cleanPrefix })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '修改前缀失败')
+    isEditingPrefix.value = false
+    await fetchAllData()
+    showToast(`项目前缀已修改为「${cleanPrefix}」，离线包与 Symbol 已同步更新`)
+  } catch (err) {
+    showToast(err.message || '修改前缀失败')
+  }
+}
+
+function openEditProjectModal(project) {
+  editProjectForm.id = project.id
+  editProjectForm.name = project.name
+  editProjectForm.prefix = project.prefix || 'icon-'
+  editProjectForm.description = project.description || ''
+  showEditProjectModal.value = true
+}
+
+async function submitEditProject() {
+  if (!editProjectForm.id) return
+  isSavingProject.value = true
+  try {
+    const res = await fetch(`/api/projects/${editProjectForm.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: editProjectForm.name,
+        prefix: editProjectForm.prefix,
+        description: editProjectForm.description
+      })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '保存项目信息失败')
+    showEditProjectModal.value = false
+    await fetchAllData()
+    showToast(`项目「${data.project.name}」已更新，前缀生效为「${data.project.prefix}」`)
+  } catch (err) {
+    showToast(err.message || '保存项目信息失败')
+  } finally {
+    isSavingProject.value = false
+  }
+}
+
+// 批量管理操作方法
+function toggleBatchMode() {
+  isBatchMode.value = !isBatchMode.value
+  if (!isBatchMode.value) {
+    selectedIconIds.value.clear()
+  }
+}
+
+function toggleSelectIcon(id) {
+  const next = new Set(selectedIconIds.value)
+  if (next.has(id)) {
+    next.delete(id)
+  } else {
+    next.add(id)
+  }
+  selectedIconIds.value = next
+}
+
+function toggleSelectAllFiltered() {
+  if (isAllFilteredSelected.value) {
+    // 全部取消
+    const next = new Set(selectedIconIds.value)
+    for (const icon of filteredIcons.value) {
+      next.delete(icon.id)
+    }
+    selectedIconIds.value = next
+  } else {
+    // 全部勾选当前筛选出的图标
+    const next = new Set(selectedIconIds.value)
+    for (const icon of filteredIcons.value) {
+      next.add(icon.id)
+    }
+    selectedIconIds.value = next
+  }
+}
+
+function handleCardClick(icon) {
+  if (isBatchMode.value) {
+    toggleSelectIcon(icon.id)
+  } else {
+    selectedIcon.value = icon
+  }
+}
+
+async function handleBatchDelete() {
+  if (selectedIconIds.value.size === 0) {
+    showToast('请先勾选需要删除的图标')
+    return
+  }
+  const count = selectedIconIds.value.size
+  if (!window.confirm(`确定要批量删除已选中的 ${count} 个图标吗？\n删除后源文件将被彻底清理，项目离线包与 Symbol 代码将自动重新生成。此操作不可恢复！`)) {
+    return
+  }
+
+  isBatchDeleting.value = true
+  try {
+    const ids = Array.from(selectedIconIds.value)
+    const res = await fetch('/api/icons/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '批量删除失败')
+
+    selectedIconIds.value.clear()
+    await fetchAllData()
+    showToast(`成功批量删除 ${data.count || count} 个图标，离线包与 Symbol 已重新构建完成`)
+  } catch (err) {
+    showToast(err.message || '批量删除失败')
+  } finally {
+    isBatchDeleting.value = false
+  }
+}
+
 async function fetchAllData() {
   const [projRes, iconRes] = await Promise.all([
     fetch('/api/projects'),
@@ -580,108 +829,15 @@ async function fetchAllData() {
   icons.value = iconData.icons || []
 }
 
-async function checkAuthStatus() {
-  if (!authToken.value) {
-    isAuthenticated.value = false
-    return
-  }
-  try {
-    const res = await fetch('/api/auth/status', {
-      headers: { Authorization: `Bearer ${authToken.value}` }
-    })
-    const data = await res.json()
-    isAuthenticated.value = Boolean(data.authenticated)
-    if (!isAuthenticated.value) {
-      authToken.value = ''
-      localStorage.removeItem(TOKEN_STORAGE_KEY)
-    }
-  } catch {
-    isAuthenticated.value = false
-  }
-}
-
-function requestProtectedAction(actionFn) {
-  if (isAuthenticated.value && authToken.value) {
-    actionFn()
-  } else {
-    pendingProtectedCallback = actionFn
-    passwordInput.value = ''
-    authError.value = ''
-    showAuthModal.value = true
-  }
-}
-
-function handleAuthButtonClick() {
-  if (isAuthenticated.value) {
-    authToken.value = ''
-    isAuthenticated.value = false
-    localStorage.removeItem(TOKEN_STORAGE_KEY)
-    showToast('已退出管理员解锁状态')
-  } else {
-    pendingProtectedCallback = null
-    passwordInput.value = ''
-    authError.value = ''
-    showAuthModal.value = true
-  }
-}
-
-function closeAuthModal() {
-  showAuthModal.value = false
-  pendingProtectedCallback = null
-}
-
-async function submitPasswordVerify() {
-  verifyingAuth.value = true
-  authError.value = ''
-  try {
-    const res = await fetch('/api/auth/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: passwordInput.value })
-    })
-    const data = await res.json()
-    if (!res.ok || !data.success) {
-      authError.value = data.error || '密码错误'
-      return
-    }
-    authToken.value = data.token
-    isAuthenticated.value = true
-    localStorage.setItem(TOKEN_STORAGE_KEY, data.token)
-    showAuthModal.value = false
-    showToast('管理员权限已解锁')
-    if (typeof pendingProtectedCallback === 'function') {
-      const fn = pendingProtectedCallback
-      pendingProtectedCallback = null
-      fn()
-    }
-  } catch {
-    authError.value = '网络请求失败，请重试'
-  } finally {
-    verifyingAuth.value = false
-  }
-}
-
-function onRequireReAuth() {
-  isAuthenticated.value = false
-  authToken.value = ''
-  localStorage.removeItem(TOKEN_STORAGE_KEY)
-  showAuthModal.value = true
-}
-
 async function submitCreateProject() {
   try {
     const res = await fetch('/api/projects', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${authToken.value}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(newProjectForm)
     })
-    if (res.status === 401) {
-      onRequireReAuth()
-      return
-    }
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || '创建失败')
     await fetchAllData()
@@ -703,13 +859,8 @@ async function handleDeleteProject(project) {
   }
   try {
     const res = await fetch(`/api/projects/${project.id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${authToken.value}` }
+      method: 'DELETE'
     })
-    if (res.status === 401) {
-      onRequireReAuth()
-      return
-    }
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || '删除失败')
     activeProjectId.value = 'all'
@@ -724,7 +875,7 @@ async function onBatchUploaded({ count, projectId }) {
   showUploadModal.value = false
   activeProjectId.value = projectId
   await fetchAllData()
-  showToast(`成功上传 ${count} 个图标，SQLite 与 Iconfont 离线包已同步更新`)
+  showToast(`成功上传 ${count} 个图标，持久化与 Iconfont 离线包已同步更新`)
 }
 
 async function onIconUpdated(updatedIcon) {
@@ -748,7 +899,7 @@ async function quickCopyFileUrl(icon) {
 }
 
 async function quickCopySymbol(icon) {
-  const tag = `<svg class="icon" aria-hidden="true"><use href="#${icon.symbolId}"></use></svg>`
+  const tag = `<svg class="icon" aria-hidden="true"><use xlink:href="#${icon.symbolId}"></use></svg>`
   await copyText(tag)
   showToast(`已复制 #${icon.symbolId} Symbol 标签`)
 }
@@ -759,6 +910,6 @@ async function copySymbolScriptTag() {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchAllData(), checkAuthStatus()])
+  await fetchAllData()
 })
 </script>

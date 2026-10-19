@@ -228,11 +228,10 @@ import { ref, computed } from 'vue'
 
 const props = defineProps({
   projects: { type: Array, required: true },
-  initialProjectId: { type: String, default: '' },
-  authToken: { type: String, default: '' }
+  initialProjectId: { type: String, default: '' }
 })
 
-const emit = defineEmits(['close', 'uploaded', 'require-auth'])
+const emit = defineEmits(['close', 'uploaded'])
 
 const targetProjectId = ref(
   props.initialProjectId && props.initialProjectId !== 'all'
@@ -489,16 +488,11 @@ async function submitBatchUpload() {
     const res = await fetch('/api/icons/batch', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${props.authToken}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
     })
     const data = await res.json()
-    if (res.status === 401) {
-      emit('require-auth')
-      return
-    }
     if (!res.ok) {
       throw new Error(data.error || '上传失败')
     }

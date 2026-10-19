@@ -54,13 +54,8 @@ function verifyTokenOrPassword(req) {
 }
 
 function requireAuth(req, res, next) {
-  if (verifyTokenOrPassword(req)) {
-    return next()
-  }
-  return res.status(401).json({
-    error: '需要管理员密码验证后才能执行此操作',
-    requireAuth: true
-  })
+  // 已取消密码验证，全员开放操作权限
+  return next()
 }
 
 async function rebuildAllBundlesAndPackages(state) {
@@ -126,7 +121,7 @@ async function startServer() {
 
   app.get('/api/auth/status', (req, res) => {
     res.json({
-      authenticated: verifyTokenOrPassword(req)
+      authenticated: true
     })
   })
 
@@ -217,11 +212,12 @@ async function startServer() {
         return res.status(400).json({ error: `项目标识 "${cleanCode}" 已存在` })
       }
       const cleanPrefix = (prefix || `${cleanCode}-`).trim().replace(/[^a-zA-Z0-9_-]/g, '')
+      const finalPrefix = (cleanPrefix.endsWith('-') || cleanPrefix.endsWith('_')) ? cleanPrefix : `${cleanPrefix}-`
       const newProject = {
         id: `proj_${Date.now().toString(36)}`,
         name: name.trim(),
         code: cleanCode,
-        prefix: cleanPrefix.endsWith('-') ? cleanPrefix : `${cleanPrefix}-`,
+        prefix: finalPrefix,
         description: (description || '').trim(),
         createdAt: new Date().toISOString()
       }
@@ -243,7 +239,7 @@ async function startServer() {
       if (name) db.projects[idx].name = name.trim()
       if (prefix) {
         const pfx = prefix.trim().replace(/[^a-zA-Z0-9_-]/g, '')
-        db.projects[idx].prefix = pfx.endsWith('-') ? pfx : `${pfx}-`
+        db.projects[idx].prefix = (pfx.endsWith('-') || pfx.endsWith('_')) ? pfx : `${pfx}-`
       }
       if (description !== undefined) db.projects[idx].description = description.trim()
 
@@ -362,11 +358,12 @@ async function startServer() {
         )
         if (!project) {
           const pfx = (autoProject.prefix || 'icon-').trim().replace(/[^a-zA-Z0-9_-]/g, '')
+          const finalPfx = (pfx.endsWith('-') || pfx.endsWith('_')) ? pfx : `${pfx}-`
           project = {
             id: autoProject.id ? `proj_${autoProject.id}` : `proj_${Date.now().toString(36)}`,
             name: autoProject.name.trim(),
             code: cleanCode,
-            prefix: pfx.endsWith('-') ? pfx : `${pfx}-`,
+            prefix: finalPfx,
             description: (autoProject.description || '从 Iconfont 导入的项目分组').trim(),
             createdAt: new Date().toISOString()
           }
@@ -496,6 +493,69 @@ async function startServer() {
       })
     } catch (err) {
       res.status(500).json({ error: err.message || '批量上传失败' })
+    }
+  })
+
+  // 批量删除图标
+  app.post('/api/icons/batch-delete', requireAuth, async (req, res) => {
+    try {
+      const { ids } = req.body || {}
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: '请提供要删除的图标 ID 列表' })
+      }
+      const db = storage.loadState()
+      const idSet = new Set(ids)
+      const toDelete = db.icons.filter((i) => idSet.has(i.id))
+
+      for (const icon of toDelete) {
+        if (icon.fileUrl) {
+          const localFile = path.join(DATA_DIR, icon.fileUrl.replace(/^\//, ''))
+          if (fs.existsSync(localFile)) {
+            try {
+              fs.unlinkSync(localFile)
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+
+      db.icons = db.icons.filter((i) => !idSet.has(i.id))
+      await saveAndRebuild(db)
+      res.json({ success: true, count: toDelete.length })
+    } catch (err) {
+      res.status(500).json({ error: err.message || '批量删除图标失败' })
+    }
+  })
+
+  app.delete('/api/icons/batch', requireAuth, async (req, res) => {
+    try {
+      const { ids } = req.body || {}
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: '请提供要删除的图标 ID 列表' })
+      }
+      const db = storage.loadState()
+      const idSet = new Set(ids)
+      const toDelete = db.icons.filter((i) => idSet.has(i.id))
+
+      for (const icon of toDelete) {
+        if (icon.fileUrl) {
+          const localFile = path.join(DATA_DIR, icon.fileUrl.replace(/^\//, ''))
+          if (fs.existsSync(localFile)) {
+            try {
+              fs.unlinkSync(localFile)
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+
+      db.icons = db.icons.filter((i) => !idSet.has(i.id))
+      await saveAndRebuild(db)
+      res.json({ success: true, count: toDelete.length })
+    } catch (err) {
+      res.status(500).json({ error: err.message || '批量删除图标失败' })
     }
   })
 

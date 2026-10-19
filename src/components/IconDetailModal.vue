@@ -174,11 +174,11 @@
           </div>
         </div>
 
-        <!-- 管理员编辑区（需要密码解锁） -->
+        <!-- 图标编辑管理区 -->
         <div style="margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border);">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
             <span style="font-size: 13.5px; font-weight: 600;">
-              ⚙️ 图标属性与管理（需操作鉴权）
+              ⚙️ 图标属性与管理
             </span>
             <label
               v-if="icon.type === 'svg'"
@@ -238,11 +238,10 @@ const props = defineProps({
   icon: { type: Object, required: true },
   projects: { type: Array, required: true },
   initialColor: { type: String, default: '#1e293b' },
-  initialSize: { type: Number, default: 64 },
-  authToken: { type: String, default: '' }
+  initialSize: { type: Number, default: 64 }
 })
 
-const emit = defineEmits(['close', 'updated', 'deleted', 'toast', 'require-auth'])
+const emit = defineEmits(['close', 'updated', 'deleted', 'toast'])
 
 const canvasBg = ref('checkerboard')
 const previewColor = ref(props.initialColor || '#1e293b')
@@ -365,8 +364,7 @@ async function handleSaveMeta() {
     const res = await fetch(`/api/icons/${props.icon.id}`, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${props.authToken}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         name: editForm.name,
@@ -376,10 +374,6 @@ async function handleSaveMeta() {
         isColorStripped: editForm.isColorStripped
       })
     })
-    if (res.status === 401) {
-      emit('require-auth')
-      return
-    }
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || '更新失败')
     emit('updated', data.icon)
@@ -394,15 +388,8 @@ async function handleSaveMeta() {
 async function handleDeleteIcon() {
   try {
     const res = await fetch(`/api/icons/${props.icon.id}`, {
-      method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${props.authToken}`
-      }
+      method: 'DELETE'
     })
-    if (res.status === 401) {
-      emit('require-auth')
-      return
-    }
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || '删除失败')
     emit('deleted', props.icon.id)
